@@ -1,3 +1,11 @@
+#### Ejecución del env del flappy-bird ########
+
 1. Abra una termianl de VS code
-2. En la raíz del proyecto haga: $ pip install -r requirements.txt
-3. En la raíz del proyecto haga: $ python3 -m flappy_bird_env
+2. En la raíz del proyecto haga: $ cd flappy_bird_env 
+3. Después ya dentro del directorio flappy_bird_env haga: $ pip install -r requirements.txt
+4. Para ejecutar el env haga: $ python3 -m flappy_bird_env
+
+#### Entrenamiento del agente ########
+
+1. Haga: $pip install tensorflow
+2. Después en el directorio flappy_bird_env haga: $python3 training_script.py

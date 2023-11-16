@@ -9,10 +9,10 @@ import pygame
 
 from gymnasium.spaces import Box, Discrete
 
-from .background import Background
-from .base import Base
-from .bird import Bird
-from .pipe import Pipe
+from background import Background
+from base import Base
+from bird import Bird
+from pipe import Pipe
 
 
 class FlappyBirdEnv(gym.Env):
