@@ -44,13 +44,13 @@ def select_action(state):
     normalized_image_array = image_array / 255.0  # Normaliza las imágenes
     
     # Expande las dimensiones de la imagen para simular un lote de tamaño 1
-    #img_batch = np.expand_dims(normalized_image_array, axis=0)
+    img_batch = np.expand_dims(normalized_image_array, axis=0)
 
     if np.random.rand() < epsilon:
         return np.random.choice(2)  # Saltar (1) o no saltar (0) de forma aleatoria
     else:
         print(f"****Input image shape: {normalized_image_array.shape}")
-        Q_values = Q_network.predict(normalized_image_array[np.newaxis, ...])[0]
+        Q_values = Q_network.predict(img_batch)[0]
         print("****HIIIII")
         return np.argmax(Q_values)
 
