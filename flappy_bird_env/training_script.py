@@ -1,139 +1,172 @@
 import numpy as np
-import tensorflow as tf
-from keras import layers
+import torch
+import torch.nn as nn
+import torch.optim as optim
 from collections import deque
 import random
+from torchvision import transforms
 
 from flappy_bird_env import FlappyBirdEnv
+env = FlappyBirdEnv(render_mode="human") # Se llama al enviroment del flappy-bird
 
-env = FlappyBirdEnv(render_mode="human")
+# Hiperparámetros 
+BATCH_SIZE = 800
+BUFFER_SIZE = 10000
+GAMMA = 0.99
+EPS_START = 0.9
+EPS_END = 0.05
+EPS_DECAY = 200
+TARGET_UPDATE = 10
 
-# Crea la red neuronal convolucional y define la arquitectura de la misma
-def create_network():
-    model = tf.keras.Sequential([
-        layers.Input(shape=(800, 576, 3)), 
-        layers.Conv2D(32, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(64, (3, 3), activation='relu'),
-        layers.MaxPooling2D((2, 2)),
-        layers.Flatten(),
-        layers.Dense(128, activation='relu'),
-        layers.Dense(2, activation='linear')  # Capa de salida: (2) salidas para las dos posibles acciones del flappy-bird (saltar o no saltar)
-    ])
-    return model
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Crea una instancia del modelo de la red
-Q_network = create_network()
-Q_network_target = create_network()
-Q_network_target.set_weights(Q_network.get_weights())
+# Definición de la arquitectura de la red neuronal
+class DQN(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        print("Input dimension:", input_dim)
+        super(DQN, self).__init__()
+        self.fc = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(1728, input_dim),
+            nn.ReLU(),
+            nn.Linear(800, 128),
+            nn.ReLU(),
+            nn.Linear(128, output_dim)
+        )
 
-# Compila el modelo
-Q_network.compile(optimizer='adam', loss='mse')  # loss'mse' = función de pérdida que se usa
+    def forward(self, x):
+        return self.fc(x)
 
-# Hiperparámetros para DQN
-gamma = 0.99  # Factor de descuento
-epsilon = 0.1  # Factor de exploración
-replay_memory_size = 10000
-replay_memory = deque(maxlen=replay_memory_size)
-batch_size = 32
-update_target_frequency = 1000  # Actualizar la red objetivo cada 1000 pasos
-
-# Función para seleccionar una acción basada en epsilon-greedy
-def select_action(state):
-    image_array = state[0]  # Extrae solo el array de imágenes
-    normalized_image_array = image_array / 255.0  # Normaliza las imágenes
+# Preprocesamiento de la observación del entorno
+def preprocess(state):
+    state = np.array(state[0])
     
-    # Expande las dimensiones de la imagen para simular un lote de tamaño 1
-    img_batch = np.expand_dims(normalized_image_array, axis=0)
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((64, 64)),
+        transforms.ToTensor()
+    ])
 
-    if np.random.rand() < epsilon:
-        return np.random.choice(2)  # Saltar (1) o no saltar (0) de forma aleatoria
+    state = transform(state)
+    return state.view(-1, 128)
+
+# Estrategia epsilon-greedy para la selección de acciones
+def epsilon_greedy(model, state, eps):
+    if random.random() > eps:
+        with torch.no_grad():
+            return model(state).argmax().item()
     else:
-        print(f"****Input image shape: {normalized_image_array.shape}")
-        Q_values = Q_network.predict(img_batch)[0]
-        print("****HIIIII")
-        return np.argmax(Q_values)
+        return random.randint(0, 1)
 
-# Función para almacenar la transición en la memoria de repetición
-def store_transition(state, action, reward, next_state, done):
-    replay_memory.append((state, action, reward, next_state, done))
+# Función de entrenamiento del agente
+def train_agent(dqn, target_dqn, optimizer, loss_fn, replay_buffer):
+    eps = EPS_START
+    step_num = 0
 
-# Función para realizar una actualización de Q utilizando DQN
-def update_Q():
-    print("****Entre a Update_Q")
-    if len(replay_memory) < batch_size:
-        print("+++++Entre al if de replay_memory")
-        return
-
-    # Muestra un lote aleatorio de la memoria de repetición
-    minibatch = np.array(random.sample(replay_memory, batch_size))
-
-    # Extrae columnas de minibatch
-    states = np.vstack(minibatch[:, 0])
-    actions = minibatch[:, 1].astype(int)
-    rewards = minibatch[:, 2]
-    next_states = minibatch[:, 3]
-    dones = minibatch[:, 4]
-
-    print("***HOLAAAA")
-    # Construye una lista de imágenes
-    next_states_images = [state[0] for state in next_states]
-    print("***HOLAAAA 222222")
-    # Redimensiona las imágenes a la forma deseada (800, 576, 3)
-    resized_images = [tf.image.resize(image, [800, 576]) for image in next_states_images]
-    print("***Original image shape:", next_states_images[0].shape)
-    print("***Resized image shape:", tf.image.resize(next_states_images[0], [800, 576]).shape)
-
-    # Convierte las imágenes redimensionadas a un array numpy
-    next_states_array = np.array([tf.image.resize(image, [800, 576]) / 255.0 for image in next_states_images])
-    print("****Next states array shape:", next_states_array.shape)
-
-    # Calcula el objetivo Q
-    targets = rewards + gamma * np.max(Q_network_target.predict(next_states_array), axis=1) * (1 - dones)
-
-    # Calcula los valores Q actuales
-    Q_values = Q_network.predict(states)
-
-    # Actualiza los valores Q para las acciones seleccionadas
-    Q_values[np.arange(len(Q_values)), actions] = targets
-
-    # Entrena la red
-    Q_network.fit(states, Q_values, epochs=1, verbose=0)
-
-
-# Actualiza la red objetivo
-def update_target_network():
-    Q_network_target.set_weights(Q_network.get_weights())
-
-# Entrenamiento del agente con DQN
-def training_agent_DQN(num_episodes):
-    for episode in range(num_episodes):
+    # Se define el número de episodios
+    for episode in range(1000): 
         state = env.reset()
-        episode_reward = 0
+        state = torch.tensor(state[0], dtype=torch.float32, device=device)
+        done = False
 
-        while True:
-            action = select_action(state)
-            next_state, reward, done, _ ,_= env.step(action)
-            #print(f"***NEXT STATE: {next_state}")
+        # Bucle de entrenamiento del agente 
+        while not done: 
+            #print("***STATE: ", len(state))
+            #print("***STATE[0]: ", len(state[0]))
+            #print("***STATE[1]: ", len(state[1]))
+            
+            # Selección de acción epsilon-greedy
+            state = torch.tensor(state, dtype=torch.float32, device=device).clone().detach()
+            action = epsilon_greedy(dqn, state, eps)
+            
+            # Ejecución de la acción en el entorno
+            next_state, reward, done, _, _ = env.step(action)
+            #print("***NEXT-STATE: ", len(next_state))
+            #print("***NEXT-STATE[0]: ", len(next_state[0]))
+            #print("***NEXT-STATE[1]: ", len(next_state[1]))
+            
+            # Almacenamiento de la transición en el búfer de repetición
+            replay_buffer.append((state, action, reward, next_state, done))
 
-            store_transition(state, action, reward, next_state, done)
-            update_Q()
+            if len(replay_buffer) >= BATCH_SIZE:
+                # Muestreo de un minibatch del búfer de repetición
+                minibatch = random.sample(replay_buffer, BATCH_SIZE)
+                #print("***MINIBATCH: ", len(minibatch[0]))
+                states, actions, rewards, next_states, dones = zip(*minibatch)
+                #print("***STATES: ", states[1])
+                #print("***STATES: ", len(states))
+                #print("***STATES[0]: ", len(states[0]))
+                #print("***STATES[1]: ", len(states[1]))
 
-            episode_reward += reward
+                # Conversión de datos a tensores de PyTorch
+                states = torch.tensor(states[0], dtype=torch.float32, device=device)
+                #print("***STATES: ", len(states))
+                #print("***STATES[0]: ", len(states[0]))
+                #print("***STATES[1]: ", len(states[1]))
+                actions = torch.tensor(actions, dtype=torch.long, device=device).unsqueeze(1)
+                rewards = torch.tensor(rewards, dtype=torch.float32, device=device)
+                next_states = torch.tensor(next_states[0], dtype=torch.float32, device=device)
+                dones = torch.tensor(dones, dtype=torch.bool, device=device)
+
+                # Cálculo de los valores Q actuales y futuros
+                #current_q_values = dqn(states).gather(1, actions)
+                current_q_values = dqn(states)
+                next_q_values = target_dqn(next_states).max(1)[0].detach()
+                #print("---NEXT-Q-VALUES: ",next_q_values)
+                #print("++++NEXT-Q-VALUES / DONES SIZE: ",next_q_values.size(), dones.size())
+                target_q_values = rewards + GAMMA * next_q_values * ~dones
+                
+
+                # Cálculo de la pérdida y actualización de la red neuronal
+                loss = loss_fn(current_q_values, target_q_values.unsqueeze(1))
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
             state = next_state
+            step_num += 1
 
-            if done:
-                break
+        if episode % TARGET_UPDATE == 0:
+            # Actualización del modelo objetivo
+            target_dqn.load_state_dict(dqn.state_dict())
 
-        if episode % update_target_frequency == 0:
-            print("***Entré a episode - update")
-            update_target_network()
+        if eps > EPS_END:
+            # Reducción de la probabilidad de exploración epsilon
+            eps -= (EPS_START - EPS_END) / EPS_DECAY
 
-        print(f"Episode: {episode + 1}, Reward: {episode_reward}")
+    print("Training complete.")
 
-if __name__ == '__main__':
-    print("Antes de la llamada a training_agent_DQN")
-    training_agent_DQN(100000)
-    print("Después de la llamada a training_agent_DQN")
-    Q_network.save("flappy_bird_DQN.h5")  # Guarda el modelo entrenado
-    env.close()  # Cierra el entorno del flappy-bird
+# Función para que el agente juegue en el entorno
+def play_game(dqn):
+    state = env.reset()
+    done = False
+    total_reward = 0
+
+    while not done:
+        action = epsilon_greedy(dqn, preprocess(state), eps=0)
+        state, reward, done, _ = env.step(action)
+        total_reward += reward
+
+    print("Total reward:", total_reward)
+
+# Función main en donde se inicializa y coordina el entrenamiento del agente
+def main():
+    input_dim = env.observation_space.shape[0]
+    print("Observation space shape:", env.observation_space.shape[0])
+    output_dim = env.action_space.n
+
+    dqn = DQN(input_dim, output_dim).to(device)
+    target_dqn = DQN(input_dim, output_dim).to(device)
+    target_dqn.load_state_dict(dqn.state_dict())
+    target_dqn.eval()
+
+    optimizer = optim.Adam(dqn.parameters(), lr=0.001)
+    loss_fn = nn.MSELoss()
+
+    replay_buffer = deque(maxlen=BUFFER_SIZE)
+
+    train_agent(dqn, target_dqn, optimizer, loss_fn, replay_buffer)
+    play_game(dqn)
+
+if __name__ == "__main__":
+    main()
