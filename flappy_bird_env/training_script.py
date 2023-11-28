@@ -20,7 +20,9 @@ TARGET_UPDATE = 10
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Definición de la arquitectura de la red neuronal
+"""
+Definición de la arquitectura de la red neuronal
+"""
 class DQN(nn.Module):
     def __init__(self, input_dim, output_dim):
         print("Input dimension:", input_dim)
