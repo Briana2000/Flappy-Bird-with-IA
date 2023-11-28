@@ -37,7 +37,15 @@ class DQN(nn.Module):
     def forward(self, x):
         return self.fc(x)
 
-# Preprocesamiento de la observación del entorno
+"""
+Realiza el preprocesamiento de la observación del entorno.
+
+Parameters:
+    state (numpy.ndarray): Observación del entorno.
+
+Returns:
+    torch.Tensor: Estado preprocesado.
+"""
 def preprocess(state):
     state = np.array(state[0])
     
@@ -50,7 +58,17 @@ def preprocess(state):
     state = transform(state)
     return state.view(-1, 128)
 
-# Estrategia epsilon-greedy para la selección de acciones
+"""
+Implementa la estrategia epsilon-greedy para la selección de acciones.
+
+Parameters:
+    model (torch.nn.Module): Modelo de la red neuronal.
+    state (torch.Tensor): Estado actual del entorno.
+    eps (float): Probabilidad de exploración.
+
+Returns:
+    int: Acción seleccionada.
+"""
 def epsilon_greedy(model, state, eps):
     if random.random() > eps:
         with torch.no_grad():
@@ -58,7 +76,21 @@ def epsilon_greedy(model, state, eps):
     else:
         return random.randint(0, 1)
 
-# Función de entrenamiento del agente
+
+
+"""
+Entrena al agente utilizando el algoritmo de Q-learning.
+
+Parameters:
+    dqn (DQN): Red neuronal principal.
+    target_dqn (DQN): Red neuronal objetivo.
+    optimizer (torch.optim.Optimizer): Optimizador para actualizar la red neuronal.
+    loss_fn (torch.nn.Module): Función de pérdida.
+    replay_buffer (deque): Búfer de repetición para almacenar transiciones.
+    
+Returns:
+    None
+"""
 def train_agent(dqn, target_dqn, optimizer, loss_fn, replay_buffer):
     eps = EPS_START
     step_num = 0
@@ -71,9 +103,6 @@ def train_agent(dqn, target_dqn, optimizer, loss_fn, replay_buffer):
 
         # Bucle de entrenamiento del agente 
         while not done: 
-            #print("***STATE: ", len(state))
-            #print("***STATE[0]: ", len(state[0]))
-            #print("***STATE[1]: ", len(state[1]))
             
             # Selección de acción epsilon-greedy
             state = torch.tensor(state, dtype=torch.float32, device=device).clone().detach()
@@ -81,9 +110,6 @@ def train_agent(dqn, target_dqn, optimizer, loss_fn, replay_buffer):
             
             # Ejecución de la acción en el entorno
             next_state, reward, done, _, _ = env.step(action)
-            #print("***NEXT-STATE: ", len(next_state))
-            #print("***NEXT-STATE[0]: ", len(next_state[0]))
-            #print("***NEXT-STATE[1]: ", len(next_state[1]))
             
             # Almacenamiento de la transición en el búfer de repetición
             replay_buffer.append((state, action, reward, next_state, done))
@@ -91,32 +117,20 @@ def train_agent(dqn, target_dqn, optimizer, loss_fn, replay_buffer):
             if len(replay_buffer) >= BATCH_SIZE:
                 # Muestreo de un minibatch del búfer de repetición
                 minibatch = random.sample(replay_buffer, BATCH_SIZE)
-                #print("***MINIBATCH: ", len(minibatch[0]))
                 states, actions, rewards, next_states, dones = zip(*minibatch)
-                #print("***STATES: ", states[1])
-                #print("***STATES: ", len(states))
-                #print("***STATES[0]: ", len(states[0]))
-                #print("***STATES[1]: ", len(states[1]))
 
                 # Conversión de datos a tensores de PyTorch
                 states = torch.tensor(states[0], dtype=torch.float32, device=device)
-                #print("***STATES: ", len(states))
-                #print("***STATES[0]: ", len(states[0]))
-                #print("***STATES[1]: ", len(states[1]))
                 actions = torch.tensor(actions, dtype=torch.long, device=device).unsqueeze(1)
                 rewards = torch.tensor(rewards, dtype=torch.float32, device=device)
                 next_states = torch.tensor(next_states[0], dtype=torch.float32, device=device)
                 dones = torch.tensor(dones, dtype=torch.bool, device=device)
 
                 # Cálculo de los valores Q actuales y futuros
-                #current_q_values = dqn(states).gather(1, actions)
                 current_q_values = dqn(states)
                 next_q_values = target_dqn(next_states).max(1)[0].detach()
-                #print("---NEXT-Q-VALUES: ",next_q_values)
-                #print("++++NEXT-Q-VALUES / DONES SIZE: ",next_q_values.size(), dones.size())
                 target_q_values = rewards + GAMMA * next_q_values * ~dones
                 
-
                 # Cálculo de la pérdida y actualización de la red neuronal
                 loss = loss_fn(current_q_values, target_q_values.unsqueeze(1))
                 optimizer.zero_grad()
@@ -136,7 +150,15 @@ def train_agent(dqn, target_dqn, optimizer, loss_fn, replay_buffer):
 
     print("Training complete.")
 
-# Función para que el agente juegue en el entorno
+"""
+Permite al agente jugar en el entorno después del entrenamiento.
+
+Parameters:
+    dqn (DQN): Red neuronal del agente.
+
+Returns:
+    None
+"""
 def play_game(dqn):
     state = env.reset()
     done = False
@@ -148,8 +170,17 @@ def play_game(dqn):
         total_reward += reward
 
     print("Total reward:", total_reward)
+    
+    
+"""
+Función main en donde se inicializa y coordina el entrenamiento del agente.
 
-# Función main en donde se inicializa y coordina el entrenamiento del agente
+Parameters:
+    None
+
+Returns:
+    None
+"""
 def main():
     input_dim = env.observation_space.shape[0]
     print("Observation space shape:", env.observation_space.shape[0])
@@ -160,7 +191,7 @@ def main():
     target_dqn.load_state_dict(dqn.state_dict())
     target_dqn.eval()
 
-    optimizer = optim.Adam(dqn.parameters(), lr=0.001)
+    optimizer = optim.Adam(dqn.parameters(), lr=0.5)
     loss_fn = nn.MSELoss()
 
     replay_buffer = deque(maxlen=BUFFER_SIZE)
